@@ -2,6 +2,7 @@
 
 'use strict';
 
+const safeBuffer = require('safe-buffer');
 const assert = require('assert');
 const crypto = require('crypto');
 const https = require('https');
@@ -11,6 +12,7 @@ const fs = require('fs');
 
 const WebSocket = require('..');
 
+const Buffer = safeBuffer.Buffer;
 const WebSocketServer = WebSocket.Server;
 let port = 8000;
 
@@ -88,11 +90,11 @@ describe('WebSocketServer', function () {
       server.listen(sockPath, () => {
         const wss = new WebSocketServer({ server });
 
-        wss.on('connection', (ws) => {
+        wss.on('connection', (ws, req) => {
           if (wss.clients.size === 1) {
-            assert.strictEqual(ws.upgradeReq.url, '/foo?bar=bar');
+            assert.strictEqual(req.url, '/foo?bar=bar');
           } else {
-            assert.strictEqual(ws.upgradeReq.url, '/');
+            assert.strictEqual(req.url, '/');
             wss.close();
             server.close(done);
           }
@@ -100,20 +102,6 @@ describe('WebSocketServer', function () {
 
         const ws = new WebSocket(`ws+unix://${sockPath}:/foo?bar=bar`);
         ws.on('open', () => new WebSocket(`ws+unix://${sockPath}`));
-      });
-    });
-
-    it('emits path specific connection event', function (done) {
-      const server = http.createServer();
-
-      server.listen(++port, () => {
-        const wss = new WebSocketServer({ server });
-        const ws = new WebSocket(`ws://localhost:${port}/endpointName`);
-
-        wss.on('connection/endpointName', (ws) => {
-          wss.close();
-          server.close(done);
-        });
       });
     });
 
@@ -262,23 +250,21 @@ describe('WebSocketServer', function () {
     it('exposes options passed to constructor', function (done) {
       const wss = new WebSocketServer({ port: ++port }, () => {
         assert.strictEqual(wss.options.port, port);
-        wss.close();
-        done();
+        wss.close(done);
       });
     });
   });
 
   describe('#maxpayload', function () {
-    it('maxpayload is passed on to clients,', function (done) {
+    it('maxpayload is passed on to clients', function (done) {
       const maxPayload = 20480;
       const wss = new WebSocketServer({ port: ++port, maxPayload }, () => {
         const ws = new WebSocket(`ws://localhost:${port}`);
       });
 
       wss.on('connection', (client) => {
-        assert.strictEqual(client.maxPayload, maxPayload);
-        wss.close();
-        done();
+        assert.strictEqual(client._maxPayload, maxPayload);
+        wss.close(done);
       });
     });
 
@@ -289,26 +275,26 @@ describe('WebSocketServer', function () {
       });
 
       wss.on('connection', (client) => {
-        assert.strictEqual(client._receiver.maxPayload, maxPayload);
-        wss.close();
-        done();
+        assert.strictEqual(client._receiver._maxPayload, maxPayload);
+        wss.close(done);
       });
     });
 
     it('maxpayload is passed on to permessage-deflate', function (done) {
       const PerMessageDeflate = require('../lib/PerMessageDeflate');
       const maxPayload = 20480;
-      const wss = new WebSocketServer({ port: ++port, maxPayload }, () => {
-        const ws = new WebSocket(`ws://localhost:${port}`);
-      });
+      const wss = new WebSocketServer({
+        perMessageDeflate: true,
+        port: ++port,
+        maxPayload
+      }, () => new WebSocket(`ws://localhost:${port}`));
 
       wss.on('connection', (client) => {
         assert.strictEqual(
-          client._receiver.extensions[PerMessageDeflate.extensionName]._maxPayload,
+          client._receiver._extensions[PerMessageDeflate.extensionName]._maxPayload,
           maxPayload
         );
-        wss.close();
-        done();
+        wss.close(done);
       });
     });
   });
@@ -361,8 +347,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 400);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -384,8 +369,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 400);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -407,8 +391,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 400);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -433,8 +416,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 400);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -460,8 +442,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 400);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -491,8 +472,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 401);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -523,10 +503,7 @@ describe('WebSocketServer', function () {
         req.end();
       });
 
-      wss.on('connection', (ws) => {
-        wss.close();
-        done();
-      });
+      wss.on('connection', (ws) => wss.close(done));
     });
 
     it('verifyClient gets client origin', function (done) {
@@ -553,8 +530,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.ok(verifyClientCalled);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -588,8 +564,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.ok(verifyClientCalled);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -664,8 +639,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 401);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -695,8 +669,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 404);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -727,10 +700,7 @@ describe('WebSocketServer', function () {
         req.end();
       });
 
-      wss.on('connection', (ws) => {
-        wss.close();
-        done();
-      });
+      wss.on('connection', (ws) => wss.close(done));
     });
 
     it('doesn\'t emit the `connection` event if socket is closed prematurely', function (done) {
@@ -789,8 +759,7 @@ describe('WebSocketServer', function () {
       wss.on('connection', (ws) => {
         ws.on('message', (data) => {
           assert.strictEqual(data, 'Hello');
-          wss.close();
-          done();
+          wss.close(done);
         });
       });
     });
@@ -799,25 +768,25 @@ describe('WebSocketServer', function () {
       const wss = new WebSocketServer({ port: ++port }, () => {
         const ws = new WebSocket(`ws://localhost:${port}`, ['prot1', 'prot2']);
 
-        ws.on('open', (client) => {
+        ws.on('open', () => {
           assert.strictEqual(ws.protocol, 'prot1');
-          wss.close();
-          done();
+          wss.close(done);
         });
       });
     });
 
     it('selects the last protocol via protocol handler', function (done) {
-      const wss = new WebSocketServer({
-        handleProtocols: (ps) => ps[ps.length - 1],
-        port: ++port
-      }, () => {
+      const handleProtocols = (protocols, request) => {
+        assert.ok(request instanceof http.IncomingMessage);
+        assert.strictEqual(request.url, '/');
+        return protocols.pop();
+      };
+      const wss = new WebSocketServer({ handleProtocols, port: ++port }, () => {
         const ws = new WebSocket(`ws://localhost:${port}`, ['prot1', 'prot2']);
 
         ws.on('open', () => {
           assert.strictEqual(ws.protocol, 'prot2');
-          wss.close();
-          done();
+          wss.close(done);
         });
       });
     });
@@ -830,10 +799,7 @@ describe('WebSocketServer', function () {
         const ws = new WebSocket(`ws://localhost:${port}`, ['prot1', 'prot2']);
 
         ws.on('open', () => done(new Error('connection must not be established')));
-        ws.on('error', () => {
-          wss.close();
-          done();
-        });
+        ws.on('error', () => wss.close(done));
       });
     });
 
@@ -845,10 +811,7 @@ describe('WebSocketServer', function () {
         const ws = new WebSocket(`ws://localhost:${port}`, ['prot1', 'prot2']);
 
         ws.on('open', () => done(new Error('connection must not be established')));
-        ws.on('error', () => {
-          wss.close();
-          done();
-        });
+        ws.on('error', () => wss.close(done));
       });
     });
 
@@ -871,8 +834,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 401);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -896,9 +858,24 @@ describe('WebSocketServer', function () {
         req.end();
       });
 
-      wss.on('connection', (ws) => {
-        wss.close();
-        done();
+      wss.on('connection', (ws) => wss.close(done));
+    });
+
+    it('emits the `headers` event', function (done) {
+      const wss = new WebSocketServer({ port: ++port }, () => {
+        const ws = new WebSocket(`ws://localhost:${port}`);
+
+        wss.on('headers', (headers, request) => {
+          assert.deepStrictEqual(headers.slice(0, 3), [
+            'HTTP/1.1 101 Switching Protocols',
+            'Upgrade: websocket',
+            'Connection: Upgrade'
+          ]);
+          assert.ok(request instanceof http.IncomingMessage);
+          assert.strictEqual(request.url, '/');
+
+          wss.on('connection', () => wss.close(done));
+        });
       });
     });
   });
@@ -915,14 +892,13 @@ describe('WebSocketServer', function () {
       const wss = new WebSocketServer({ port: ++port }, () => {
         const ws = new WebSocket(`ws://localhost:${port}`);
 
-        ws.on('message', (message, flags) => ws.send(message));
+        ws.on('message', (message) => ws.send(message));
       });
 
       wss.on('connection', (client) => {
         client.on('message', (message) => {
           assert.strictEqual(message, data);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         client.send(data);
@@ -938,8 +914,7 @@ describe('WebSocketServer', function () {
 
       wss.on('connection', (client) => {
         assert.strictEqual(client.protocol, 'hi');
-        wss.close();
-        done();
+        wss.close(done);
       });
     });
 
@@ -950,27 +925,17 @@ describe('WebSocketServer', function () {
 
       wss.on('connection', (client) => {
         assert.strictEqual(client.protocolVersion, 8);
-        wss.close();
-        done();
-      });
-    });
-
-    it('upgradeReq is the original request object', function (done) {
-      const wss = new WebSocketServer({ port: ++port }, () => {
-        const ws = new WebSocket(`ws://localhost:${port}`, { protocolVersion: 8 });
-      });
-
-      wss.on('connection', (client) => {
-        assert.strictEqual(client.upgradeReq.httpVersion, '1.1');
-        wss.close();
-        done();
+        wss.close(done);
       });
     });
   });
 
   describe('permessage-deflate', function () {
     it('accept connections with permessage-deflate extension', function (done) {
-      const wss = new WebSocketServer({ port: ++port }, () => {
+      const wss = new WebSocketServer({
+        perMessageDeflate: true,
+        port: ++port
+      }, () => {
         const req = http.request({
           headers: {
             'Connection': 'Upgrade',
@@ -986,14 +951,14 @@ describe('WebSocketServer', function () {
         req.end();
       });
 
-      wss.on('connection', (ws) => {
-        wss.close();
-        done();
-      });
+      wss.on('connection', (ws) => wss.close(done));
     });
 
     it('does not accept connections with not defined extension parameter', function (done) {
-      const wss = new WebSocketServer({ port: ++port }, () => {
+      const wss = new WebSocketServer({
+        perMessageDeflate: true,
+        port: ++port
+      }, () => {
         const req = http.request({
           headers: {
             'Connection': 'Upgrade',
@@ -1008,8 +973,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 400);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();
@@ -1021,7 +985,10 @@ describe('WebSocketServer', function () {
     });
 
     it('does not accept connections with invalid extension parameter', function (done) {
-      const wss = new WebSocketServer({ port: ++port }, () => {
+      const wss = new WebSocketServer({
+        perMessageDeflate: true,
+        port: ++port
+      }, () => {
         const req = http.request({
           headers: {
             'Connection': 'Upgrade',
@@ -1036,8 +1003,7 @@ describe('WebSocketServer', function () {
 
         req.on('response', (res) => {
           assert.strictEqual(res.statusCode, 400);
-          wss.close();
-          done();
+          wss.close(done);
         });
 
         req.end();

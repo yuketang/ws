@@ -1,9 +1,12 @@
 'use strict';
 
+const safeBuffer = require('safe-buffer');
 const assert = require('assert');
 
 const PerMessageDeflate = require('../lib/PerMessageDeflate');
 const Sender = require('../lib/Sender');
+
+const Buffer = safeBuffer.Buffer;
 
 describe('Sender', function () {
   describe('.frame', function () {
@@ -31,42 +34,6 @@ describe('Sender', function () {
       });
 
       assert.strictEqual(list[0][0] & 0x40, 0x40);
-    });
-  });
-
-  describe('#ping', function () {
-    it('works with multiple types of data', function (done) {
-      let count = 0;
-      const sender = new Sender({
-        write: (data) => {
-          assert.ok(data.equals(Buffer.from([0x89, 0x02, 0x68, 0x69])));
-          if (++count === 3) done();
-        }
-      });
-
-      const array = new Uint8Array([0x68, 0x69]);
-
-      sender.ping(array.buffer, false);
-      sender.ping(array, false);
-      sender.ping('hi', false);
-    });
-  });
-
-  describe('#pong', function () {
-    it('works with multiple types of data', function (done) {
-      let count = 0;
-      const sender = new Sender({
-        write: (data) => {
-          assert.ok(data.equals(Buffer.from([0x8a, 0x02, 0x68, 0x69])));
-          if (++count === 3) done();
-        }
-      });
-
-      const array = new Uint8Array([0x68, 0x69]);
-
-      sender.pong(array.buffer, false);
-      sender.pong(array, false);
-      sender.pong('hi', false);
     });
   });
 
@@ -225,6 +192,58 @@ describe('Sender', function () {
 
       sender.processing = false;
       sender.send('hi', { compress: false, fin: true });
+    });
+  });
+
+  describe('#ping', function () {
+    it('works with multiple types of data', function (done) {
+      const perMessageDeflate = new PerMessageDeflate({ threshold: 0 });
+      let count = 0;
+      const sender = new Sender({
+        write: (data) => {
+          if (++count === 1) return;
+
+          assert.ok(data.equals(Buffer.from([0x89, 0x02, 0x68, 0x69])));
+          if (count === 4) done();
+        }
+      }, {
+        'permessage-deflate': perMessageDeflate
+      });
+
+      perMessageDeflate.accept([{}]);
+
+      const array = new Uint8Array([0x68, 0x69]);
+
+      sender.send('foo', { compress: true, fin: true });
+      sender.ping(array.buffer, false);
+      sender.ping(array, false);
+      sender.ping('hi', false);
+    });
+  });
+
+  describe('#pong', function () {
+    it('works with multiple types of data', function (done) {
+      const perMessageDeflate = new PerMessageDeflate({ threshold: 0 });
+      let count = 0;
+      const sender = new Sender({
+        write: (data) => {
+          if (++count === 1) return;
+
+          assert.ok(data.equals(Buffer.from([0x8a, 0x02, 0x68, 0x69])));
+          if (count === 4) done();
+        }
+      }, {
+        'permessage-deflate': perMessageDeflate
+      });
+
+      perMessageDeflate.accept([{}]);
+
+      const array = new Uint8Array([0x68, 0x69]);
+
+      sender.send('foo', { compress: true, fin: true });
+      sender.pong(array.buffer, false);
+      sender.pong(array, false);
+      sender.pong('hi', false);
     });
   });
 
